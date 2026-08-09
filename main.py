@@ -361,7 +361,8 @@ def make_volume_alert(
         f"(threshold {multiplier:.1f}×)\n"
         f"24h price change: <b>{direction}{price_change:.2f}%</b>\n"
         f"Price: <code>{format_price(price)} USDT</code>\n"
-        f'<a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
+f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
     )
 
 
