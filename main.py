@@ -385,7 +385,9 @@ def make_pump_alert(
         f"Volume-rate spike: <b>{volume_ratio:.1f}×</b> "
         f"(threshold {volume_spike_threshold:.1f}×)\n"
         f"24h volume: <b>{format_usdt(float(ticker.get('quoteVolume') or 0))}</b>\n"
-        f'<a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
+f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+
     )
 
 
