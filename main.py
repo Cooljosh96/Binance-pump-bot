@@ -277,6 +277,34 @@ class BinanceClient:
                     result[name] = symbol
         return result
 
+    def taker_buy_sell_volume(
+        self, symbol: str, interval: str = "5m"
+    ) -> tuple[float, float] | None:
+        """Return (buy_quote_volume, sell_quote_volume) for the most recent closed kline.
+
+        Uses the klines endpoint's "taker buy quote asset volume" field (index 10):
+        volume where a market buy hit the ask. Sell volume is the remainder of that
+        candle's total quote volume (index 7). limit=2 is used so we can read the
+        last *closed* candle (index -2) rather than the still-forming one.
+        """
+        try:
+            payload = self._get_json(
+                f"/api/v3/klines?symbol={symbol}&interval={interval}&limit=2"
+            )
+        except RuntimeError as exc:
+            logger.warning("Could not fetch klines for %s: %s", symbol, exc)
+            return None
+        if not isinstance(payload, list) or not payload:
+            return None
+        kline = payload[-2] if len(payload) >= 2 else payload[-1]
+        try:
+            total_volume = float(kline[7])
+            buy_volume = float(kline[10])
+        except (IndexError, TypeError, ValueError):
+            return None
+        sell_volume = max(0.0, total_volume - buy_volume)
+        return buy_volume, sell_volume
+
     def twenty_four_hour_tickers(self) -> dict[str, dict[str, Any]]:
         payload = self._get_json("/api/v3/ticker/24hr")
         if not isinstance(payload, list):
@@ -342,12 +370,29 @@ def make_new_listing_alert(symbol: str, listing: dict[str, Any], ticker: dict[st
     )
 
 
+def make_buy_sell_line(buy_sell: tuple[float, float] | None) -> str:
+    if buy_sell is None:
+        return ""
+    buy_volume, sell_volume = buy_sell
+    total = buy_volume + sell_volume
+    if total <= 0:
+        return ""
+    buy_pct = buy_volume / total * 100
+    sell_pct = 100 - buy_pct
+    bias = "🟢 buy-heavy" if buy_pct >= 55 else "🔴 sell-heavy" if sell_pct >= 55 else "⚪ balanced"
+    return (
+        f"Buy/Sell: 🟢 {format_usdt(buy_volume)} ({buy_pct:.0f}%) / "
+        f"🔴 {format_usdt(sell_volume)} ({sell_pct:.0f}%) — {bias}\n"
+    )
+
+
 def make_volume_alert(
     symbol: str,
     ticker: dict[str, Any],
     current_volume: float,
     baseline: float,
     multiplier: float,
+    buy_sell: tuple[float, float] | None = None,
 ) -> str:
     price = float(ticker.get("lastPrice") or 0)
     price_change = float(ticker.get("priceChangePercent") or 0)
@@ -360,6 +405,7 @@ def make_volume_alert(
         f"Spike: <b>{current_volume / baseline:.1f}×</b> "
         f"(threshold {multiplier:.1f}×)\n"
         f"24h price change: <b>{direction}{price_change:.2f}%</b>\n"
+        f"{make_buy_sell_line(buy_sell)}"
         f"Price: <code>{format_price(price)} USDT</code>\n"
         f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
 f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
@@ -374,6 +420,7 @@ def make_pump_alert(
     volume_ratio: float,
     window_minutes: float,
     volume_spike_threshold: float,
+    buy_sell: tuple[float, float] | None = None,
 ) -> str:
     price_change_sign = "+" if price_change >= 0 else ""
     price_change_line = f"{price_change_sign}{price_change:.2f}%"
@@ -385,6 +432,7 @@ def make_pump_alert(
         f"Volume-rate spike: <b>{volume_ratio:.1f}×</b> "
         f"(threshold {volume_spike_threshold:.1f}×)\n"
         f"24h volume: <b>{format_usdt(float(ticker.get('quoteVolume') or 0))}</b>\n"
+        f"{make_buy_sell_line(buy_sell)}"
         f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
 f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
 
@@ -481,6 +529,7 @@ class AlertBot:
                 last_alert = int(last_alerts.get(f"volume:{symbol}", 0) or 0)
                 cooldown_over = now - last_alert >= self.config.volume_alert_cooldown_seconds
                 if current_volume >= previous_baseline * self.config.volume_multiplier and cooldown_over:
+                    buy_sell = self.binance.taker_buy_sell_volume(symbol)
                     self.send_alert(
                         make_volume_alert(
                             symbol,
@@ -488,6 +537,7 @@ class AlertBot:
                             current_volume,
                             previous_baseline,
                             self.config.volume_multiplier,
+                            buy_sell,
                         ),
                         f"unusual volume {symbol}",
                     )
@@ -540,6 +590,7 @@ class AlertBot:
                     and pump_cooldown_over
                 ):
                     window_minutes = max(0.1, (now - first_timestamp) / 60)
+                    buy_sell = self.binance.taker_buy_sell_volume(symbol)
                     self.send_alert(
                         make_pump_alert(
                             symbol,
@@ -549,6 +600,7 @@ class AlertBot:
                             volume_ratio,
                             window_minutes,
                             self.config.pump_volume_spike,
+                            buy_sell,
                         ),
                         f"pump {symbol}",
                     )
