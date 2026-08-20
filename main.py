@@ -374,12 +374,12 @@ def make_new_listing_alert(symbol: str, listing: dict[str, Any], ticker: dict[st
 
 def make_buy_sell_line(buy_sell: tuple[float, float] | None) -> str:
     if buy_sell is None:
-        return "Buy/Sell volume: unavailable for latest closed 5m candle\\n"
+        return "Buy/Sell volume: unavailable for latest closed 5m candle\n"
 
     buy_volume, sell_volume = buy_sell
     total = buy_volume + sell_volume
     if total <= 0:
-        return "Buy/Sell volume: unavailable for latest closed 5m candle\\n"
+        return "Buy/Sell volume: unavailable for latest closed 5m candle\n"
 
     buy_pct = buy_volume / total * 100
     sell_pct = sell_volume / total * 100
@@ -396,9 +396,9 @@ def make_buy_sell_line(buy_sell: tuple[float, float] | None) -> str:
         pressure = "⚪ BALANCED"
 
     return (
-        f"Buy volume (5m): 🟢 <b>{format_usdt(buy_volume)}</b> ({buy_pct:.0f}%)\\n"
-        f"Sell volume (5m): 🔴 <b>{format_usdt(sell_volume)}</b> ({sell_pct:.0f}%)\\n"
-        f"Pressure: <b>{pressure}</b>\\n"
+        f"Buy volume (5m): 🟢 <b>{format_usdt(buy_volume)}</b> ({buy_pct:.0f}%)\n"
+        f"Sell volume (5m): 🔴 <b>{format_usdt(sell_volume)}</b> ({sell_pct:.0f}%)\n"
+        f"Pressure: <b>{pressure}</b>\n"
     )
 
 
@@ -414,16 +414,16 @@ def make_volume_alert(
     price_change = float(ticker.get("priceChangePercent") or 0)
     direction = "+" if price_change >= 0 else ""
     return (
-        "📈 <b>Unusual Binance volume</b>\\n\\n"
-        f"<b>{html_escape(symbol)}</b>\\n"
-        f"24h volume: <b>{format_usdt(current_volume)}</b>\\n"
-        f"Baseline: {format_usdt(baseline)}\\n"
+        "📈 <b>Unusual Binance volume</b>\n\n"
+        f"<b>{html_escape(symbol)}</b>\n"
+        f"24h volume: <b>{format_usdt(current_volume)}</b>\n"
+        f"Baseline: {format_usdt(baseline)}\n"
         f"Spike: <b>{current_volume / baseline:.1f}×</b> "
-        f"(threshold {multiplier:.1f}×)\\n"
-        f"24h price change: <b>{direction}{price_change:.2f}%</b>\\n"
+        f"(threshold {multiplier:.1f}×)\n"
+        f"24h price change: <b>{direction}{price_change:.2f}%</b>\n"
         f"{make_buy_sell_line(buy_sell)}"
-        f"Price: <code>{format_price(price)} USDT</code>\\n"
-        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\\n'
+        f"Price: <code>{format_price(price)} USDT</code>\n"
+        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
         f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
     )
 
@@ -441,15 +441,15 @@ def make_pump_alert(
     price_change_sign = "+" if price_change >= 0 else ""
     price_change_line = f"{price_change_sign}{price_change:.2f}%"
     return (
-        "🚨 <b>Binance pump alert</b>\\n\\n"
+        "🚨 <b>Binance pump alert</b>\n\n"
         f"<b>{html_escape(symbol)}</b>\\n"
-        f"Price: <code>{format_price(price)} USDT</code>\\n"
-        f"Price change: <b>{price_change_line}</b> in {window_minutes:.1f}m\\n"
+        f"Price: <code>{format_price(price)} USDT</code>\n"
+        f"Price change: <b>{price_change_line}</b> in {window_minutes:.1f}m\n"
         f"Volume-rate spike: <b>{volume_ratio:.1f}×</b> "
-        f"(threshold {volume_spike_threshold:.1f}×)\\n"
-        f"24h volume: <b>{format_usdt(float(ticker.get('quoteVolume') or 0))}</b>\\n"
+        f"(threshold {volume_spike_threshold:.1f}×)\n"
+        f"24h volume: <b>{format_usdt(float(ticker.get('quoteVolume') or 0))}</b>\n"
         f"{make_buy_sell_line(buy_sell)}"
-        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\\n'
+        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
         f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
     )
 
