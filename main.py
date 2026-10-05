@@ -277,6 +277,34 @@ class BinanceClient:
                     result[name] = symbol
         return result
 
+    def unusual_5m_volume(self, symbol: str, lookback_candles: int = 12) -> tuple[float, float, float] | None:
+        """Return latest closed 5m volume, prior 1h average, and spike ratio."""
+        limit = lookback_candles + 2
+        try:
+            payload = self._get_json(
+                f"/api/v3/klines?symbol={symbol}&interval=5m&limit={limit}"
+            )
+        except RuntimeError as exc:
+            logger.warning("Could not fetch 5m volume for %s: %s", symbol, exc)
+            return None
+
+        if not isinstance(payload, list) or len(payload) < lookback_candles + 1:
+            return None
+
+        # Ignore the currently forming candle.
+        closed = payload[:-1]
+        latest = closed[-1]
+        previous = closed[-(lookback_candles + 1):-1]
+        try:
+            latest_volume = float(latest[7])
+            average_volume = sum(float(kline[7]) for kline in previous) / len(previous)
+        except (IndexError, TypeError, ValueError, ZeroDivisionError):
+            return None
+
+        if average_volume <= 0:
+            return None
+        return latest_volume, average_volume, latest_volume / average_volume
+
     def taker_buy_sell_volume(
         self, symbol: str, interval: str = "5m"
     ) -> tuple[float, float] | None:
@@ -402,6 +430,33 @@ def make_buy_sell_line(buy_sell: tuple[float, float] | None) -> str:
     )
 
 
+def make_unusual_5m_volume_alert(
+    symbol: str,
+    ticker: dict[str, Any],
+    latest_volume: float,
+    average_volume: float,
+    multiplier: float,
+    buy_sell: tuple[float, float] | None = None,
+) -> str:
+    price = float(ticker.get("lastPrice") or 0)
+    price_change = float(ticker.get("priceChangePercent") or 0)
+    direction = "+" if price_change >= 0 else ""
+    return (
+        "📈 <b>Unusual Binance volume</b>\n\n"
+        f"<b>{html_escape(symbol)}</b>\n"
+        f"5m volume: <b>{format_usdt(latest_volume)}</b>\n"
+        f"Previous 1h avg (5m): {format_usdt(average_volume)}\n"
+        f"Spike: <b>{latest_volume / average_volume:.1f}×</b> "
+        f"(threshold {multiplier:.1f}×)\n"
+        f"24h volume: <b>{format_usdt(float(ticker.get('quoteVolume') or 0))}</b>\n"
+        f"24h price change: <b>{direction}{price_change:.2f}%</b>\n"
+        f"{make_buy_sell_line(buy_sell)}"
+        f"Price: <code>{format_price(price)} USDT</code>\n"
+        f'📈 <a href="https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}">Open on TradingView</a>\n'
+        f'🟡 <a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+    )
+
+
 def make_volume_alert(
     symbol: str,
     ticker: dict[str, Any],
@@ -482,184 +537,4 @@ class AlertBot:
             self.config.poll_interval_seconds,
             self.config.volume_multiplier,
             format_usdt(self.config.minimum_quote_volume_usdt),
-            self.config.binance_api_base_url,
-            self.config.state_file,
-        )
-        if self.config.dry_run:
-            logger.warning("DRY_RUN=true; Telegram messages will only be logged")
-
-        while not self.stop_requested:
-            started = time.monotonic()
-            try:
-                self.check_once()
-            except Exception:
-                logger.exception("Check cycle failed; will retry on the next cycle")
-            elapsed = time.monotonic() - started
-            sleep_seconds = max(1, self.config.poll_interval_seconds - int(elapsed))
-            if not self.stop_requested:
-                time.sleep(sleep_seconds)
-
-        self.state.save()
-        logger.info("Bot stopped cleanly")
-
-    def check_once(self) -> None:
-        listings = self.binance.usdt_symbols()
-        tickers = self.binance.twenty_four_hour_tickers()
-        now = int(time.time())
-        known_symbols: dict[str, int] = self.state.data.setdefault("known_symbols", {})
-        baselines: dict[str, float] = self.state.data.setdefault("volume_baselines", {})
-        last_alerts: dict[str, int] = self.state.data.setdefault("last_alerts", {})
-        pump_history: dict[str, list[list[float]]] = self.state.data.setdefault(
-            "pump_history", {}
-        )
-
-        alerts_sent = 0
-        first_run = self.state.data.get("initialized_at") is None
-        listing_window_ms = self.config.new_listing_window_hours * 60 * 60 * 1000
-
-        for symbol, listing in listings.items():
-            ticker = tickers.get(symbol)
-            if not ticker:
-                continue
-
-            current_volume = float(ticker.get("quoteVolume") or 0)
-            if current_volume < 0:
-                continue
-
-            onboard_date = int(listing.get("onboardDate") or 0)
-            is_recent_listing = (
-                onboard_date > 0
-                and (now * 1000 - onboard_date) <= listing_window_ms
-            )
-            is_new_to_bot = symbol not in known_symbols
-
-            if is_new_to_bot:
-                should_alert = not first_run or is_recent_listing
-                known_symbols[symbol] = now
-                if should_alert:
-                    self.send_alert(make_new_listing_alert(symbol, listing, ticker), f"new listing {symbol}")
-                    alerts_sent += 1
-
-            previous_baseline = float(baselines.get(symbol, 0) or 0)
-            if previous_baseline > 0 and current_volume >= self.config.minimum_quote_volume_usdt:
-                last_alert = int(last_alerts.get(f"volume:{symbol}", 0) or 0)
-                cooldown_over = now - last_alert >= self.config.volume_alert_cooldown_seconds
-                if current_volume >= previous_baseline * self.config.volume_multiplier and cooldown_over:
-                    buy_sell = self.binance.taker_buy_sell_volume(symbol)
-                    self.send_alert(
-                        make_volume_alert(
-                            symbol,
-                            ticker,
-                            current_volume,
-                            previous_baseline,
-                            self.config.volume_multiplier,
-                            buy_sell,
-                        ),
-                        f"unusual volume {symbol}",
-                    )
-                    last_alerts[f"volume:{symbol}"] = now
-                    alerts_sent += 1
-
-            if previous_baseline <= 0:
-                baselines[symbol] = current_volume
-            else:
-                alpha = self.config.baseline_alpha
-                baselines[symbol] = (alpha * current_volume) + ((1 - alpha) * previous_baseline)
-
-            history = pump_history.setdefault(symbol, [])
-            history.append([float(now), float(ticker.get("lastPrice") or 0), current_volume])
-            if len(history) > self.config.pump_history_samples:
-                del history[:-self.config.pump_history_samples]
-
-            if len(history) >= self.config.pump_history_samples:
-                first_timestamp, old_price, _ = history[0]
-                _, price, _ = history[-1]
-                price_change = ((price - old_price) / old_price * 100) if old_price > 0 else 0
-                volume_changes = [
-                    history[index][2] - history[index - 1][2]
-                    for index in range(1, len(history))
-                ]
-                previous_changes = volume_changes[:-1]
-                recent_change = volume_changes[-1]
-                positive_previous_changes = [
-                    change for change in previous_changes if change > 0
-                ]
-                average_previous_change = (
-                    sum(positive_previous_changes) / len(positive_previous_changes)
-                    if positive_previous_changes
-                    else 0
-                )
-                volume_ratio = (
-                    recent_change / average_previous_change
-                    if average_previous_change > 0
-                    else 0
-                )
-                pump_last_alert = int(
-                    last_alerts.get(f"pump:{symbol}", 0) or 0
-                )
-                pump_cooldown_over = (
-                    now - pump_last_alert >= self.config.pump_cooldown_seconds
-                )
-                if (
-                    price_change >= self.config.pump_price_change_percent
-                    and volume_ratio >= self.config.pump_volume_spike
-                    and pump_cooldown_over
-                ):
-                    window_minutes = max(0.1, (now - first_timestamp) / 60)
-                    buy_sell = self.binance.taker_buy_sell_volume(symbol)
-                    self.send_alert(
-                        make_pump_alert(
-                            symbol,
-                            ticker,
-                            price,
-                            price_change,
-                            volume_ratio,
-                            window_minutes,
-                            self.config.pump_volume_spike,
-                            buy_sell,
-                        ),
-                        f"pump {symbol}",
-                    )
-                    last_alerts[f"pump:{symbol}"] = now
-                    alerts_sent += 1
-
-        self.state.data["initialized_at"] = self.state.data.get("initialized_at") or now
-        self.state.save()
-        logger.info(
-            "Checked %d USDT pairs; %d alert(s); %d known pair(s); %d pump histories",
-            len(listings),
-            alerts_sent,
-            len(known_symbols),
-            len(pump_history),
-        )
-
-    def send_alert(self, message: str, description: str) -> None:
-        try:
-            self.telegram.send_message(message)
-            logger.info("Sent %s alert", description)
-        except Exception:
-            logger.exception("Could not send %s alert", description)
-
-
-def configure_logging() -> None:
-    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-
-def main() -> None:
-    configure_logging()
-    try:
-        config = Config.from_environment()
-        AlertBot(config).run()
-    except ValueError as exc:
-        logger.error("%s", exc)
-        raise SystemExit(2) from exc
-
-
-if __name__ == "__main__":
-    main()
+            self.co
