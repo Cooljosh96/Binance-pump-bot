@@ -327,6 +327,17 @@ def html_escape(value: str) -> str:
     )
 
 
+def make_chart_links(symbol: str) -> str:
+    """Return quick chart links for the alert's USDT pair."""
+    return (
+        f'<a href="https://www.binance.com/en/trade/{symbol}?type=spot">Binance</a>'
+        " · "
+        f'<a href="https://www.tradingview.com/symbols/{symbol}/?exchange=BINANCE">TradingView</a>'
+        " · "
+        f'<a href="https://www.bybit.com/trade/usdt/{symbol}">Bybit</a>'
+    )
+
+
 def make_new_listing_alert(symbol: str, listing: dict[str, Any], ticker: dict[str, Any]) -> str:
     price = float(ticker.get("lastPrice") or 0)
     quote_volume = float(ticker.get("quoteVolume") or 0)
@@ -338,7 +349,7 @@ def make_new_listing_alert(symbol: str, listing: dict[str, Any], ticker: dict[st
         f"Listed: {html_escape(listed_line)}\n"
         f"Price: <code>{format_price(price)} USDT</code>\n"
         f"24h volume: <b>{format_usdt(quote_volume)}</b>\n"
-        f'<a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+        f"Charts: {make_chart_links(symbol)}"
     )
 
 
@@ -361,7 +372,7 @@ def make_volume_alert(
         f"(threshold {multiplier:.1f}×)\n"
         f"24h price change: <b>{direction}{price_change:.2f}%</b>\n"
         f"Price: <code>{format_price(price)} USDT</code>\n"
-        f'<a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+        f"Charts: {make_chart_links(symbol)}"
     )
 
 
@@ -384,7 +395,7 @@ def make_pump_alert(
         f"Volume-rate spike: <b>{volume_ratio:.1f}×</b> "
         f"(threshold {volume_spike_threshold:.1f}×)\n"
         f"24h volume: <b>{format_usdt(float(ticker.get('quoteVolume') or 0))}</b>\n"
-        f'<a href="https://www.binance.com/en/trade/{symbol}?type=spot">Open on Binance</a>'
+        f"Charts: {make_chart_links(symbol)}"
     )
 
 
